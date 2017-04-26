@@ -120,8 +120,19 @@ public:
   void execute() const
     {
       Impl::QthreadsExec::exec_all( Qthreads::instance() , & ParallelFor::exec , this );
+//       for ( int i = 1 ; i < OpenMPexec::pool_size() ; ++i ) {
+//         ValueJoin::join( ReducerConditional::select(m_functor , m_reducer) , ptr , OpenMPexec::pool_rev(i)->scratch_reduce() );
+//       }
 
+//       Kokkos::Impl::FunctorFinal<  ReducerTypeFwd , WorkTag >::final( ReducerConditional::select(m_functor , m_reducer) , ptr );
+
+//       if ( m_result_ptr ) {
+//         const int n = ValueTraits::value_count( ReducerConditional::select(m_functor , m_reducer) );
+
+//         for ( int j = 0 ; j < n ; ++j ) { m_result_ptr[j] = ptr[j] ; }
+//       }
     }
+
 
   ParallelFor( const FunctorType & arg_functor
              , const Policy      & arg_policy

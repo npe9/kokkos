@@ -93,6 +93,7 @@ public:
   //! Tag this class as an execution space
   typedef Qthreads                 execution_space;
   typedef Kokkos::HostSpace        memory_space;
+
   //! This execution space preferred device_type
   typedef Kokkos::Device< execution_space, memory_space > device_type;
 
@@ -103,6 +104,8 @@ public:
 
   //@}
   /*------------------------------------------------------------------------*/
+  //! \name Functions that all Kokkos execution spaces must implement.
+  //@{
 
   /** \brief  Initialization will construct one or more instances */
   static Qthreads & instance( int = 0 );
@@ -134,9 +137,16 @@ public:
    */
   static void fence();
 
+  /** \brief Print configuration information to the given output stream. */
+  static void print_configuration( std::ostream & , const bool detail = false );
+
+  /// \brief Free any resources being consumed by the device.
+  static void finalize();
+
   /*------------------------------------------------------------------------*/
 
-  static int in_parallel();
+  static void initialize( int thread_count );
+  inline static bool in_parallel() { return 1; }
 
   static int is_initialized();
 

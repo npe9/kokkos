@@ -741,7 +741,7 @@ ifeq ($(KOKKOS_INTERNAL_USE_QTHREADS), 1)
   KOKKOS_HEADERS += $(wildcard $(KOKKOS_PATH)/core/src/Qthreads/*.hpp)
   KOKKOS_CPPFLAGS += -I$(QTHREADS_PATH)/include
   KOKKOS_LDFLAGS += -L$(QTHREADS_PATH)/lib
-  KOKKOS_LIBS += -lqthread
+  KOKKOS_LIBS += -L/home/nevans/src/qthreads/src -L/home/nevans/src/qthreads/src/.libs -lqthread
 endif
 
 # Explicitly set the GCC Toolchain for Clang.
