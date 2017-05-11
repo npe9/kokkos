@@ -53,7 +53,7 @@
 #define QTHREAD_LOCAL_PRIORITY
 #define CLONED_TASKS
 
-#include <qthread.h>
+#include <qthread/qthread.h>
 
 #include <cstddef>
 #include <iosfwd>
