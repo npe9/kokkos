@@ -217,9 +217,9 @@ elif [ "$MACHINE" = "bowman" ]; then
              "gcc/4.9.3 $GCC_MODULE_LIST $GCC_BUILD_LIST g++ $GCC_WARNING_FLAGS"
   )
 
-  if [ -z "$ARCH_FLAG" ]; then
+  #if [ -z "$ARCH_FLAG" ]; then
     #ARCH_FLAG="--arch=KNL"
-  fi
+  #fi
 
   NUM_JOBS_TO_RUN_IN_PARALLEL=2
 

@@ -119,8 +119,8 @@ public:
   typedef Kokkos::OpenMP    execution_space;
 #elif defined( KOKKOS_ENABLE_THREADS )
   typedef Kokkos::Threads   execution_space;
-//#elif defined( KOKKOS_ENABLE_QTHREADS )
-//  typedef Kokkos::Qthreads  execution_space;
+#elif defined( KOKKOS_ENABLE_QTHREADS )
+  typedef Kokkos::Qthreads  execution_space;
 #elif defined( KOKKOS_ENABLE_SERIAL )
   typedef Kokkos::Serial    execution_space;
 #else
