@@ -117,7 +117,7 @@ int Qthreads::concurrency()
   return Impl::s_number_workers_per_shepherd;
 }
 
-int Qthreads::in_parallel()
+bool Qthreads::in_parallel()
 {
   return Impl::s_active_function != 0;
 }

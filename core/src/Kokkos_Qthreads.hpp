@@ -146,18 +146,14 @@ public:
   /*------------------------------------------------------------------------*/
 
   static void initialize( int thread_count );
-  inline static bool in_parallel() { return 1; }
+  static bool in_parallel();
 
   static int is_initialized();
 
   /** \brief  Return maximum amount of concurrency */
   static int concurrency();
 
-  static void initialize( int thread_count );
-  static void finalize();
-
-  /** \brief Print configuration information to the given output stream. */
-  static void print_configuration( std::ostream &, const bool detail = false );
+  inline static int thread_pool_size( int depth = 0 );
 
   int shepherd_size() const;
   int shepherd_worker_size() const;
