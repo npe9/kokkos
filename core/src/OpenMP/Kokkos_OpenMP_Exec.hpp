@@ -112,6 +112,7 @@ private:
 
   HostThreadTeamData * m_pool[ MAX_THREAD_COUNT ];
 
+  stack <Exec> instance_stack;
 public:
 
   static void verify_is_master( const char * const );
@@ -190,6 +191,40 @@ void OpenMP::fence( OpenMP const& instance ) noexcept {}
 inline
 bool OpenMP::is_asynchronous( OpenMP const& instance ) noexcept
 { return false; }
+
+void OpenMP::push_thread_context( int num_threads
+                                  ) {
+  Exec::validate_partition( Impl::t_openmp_instance->m_pool_size, num_threads, 1 );
+  instance_stack.push(Impl::t_openmp_instance);
+  void * const ptr = space.allocate( sizeof(Exec) );
+  Impl::t_openmp_instance = new (ptr) Exec( num_threads );
+
+  size_t pool_reduce_bytes  =   32 * num_threads ;
+  size_t team_reduce_bytes  =   32 * num_threads ;
+  size_t team_shared_bytes  = 1024 * num_threads ;
+  size_t thread_local_bytes = 1024 ;
+
+  Impl::t_openmp_instance->resize_thread_data( pool_reduce_bytes
+                                               , team_reduce_bytes
+                                               , team_shared_bytes
+                                               , thread_local_bytes
+                                               );
+  omp_set_num_threads(num_threads);
+}
+
+void OpenMP::pop_thread_context( int num_threads
+                                    ) {
+  int num_threads = Impl::t_openmp_instance->m_pool_size;
+  Exec tmp = instance_stack.pop();
+  Exec::validate_partition(num_threads, Impl::t_openmp_instance->m_pool_size, 1);
+
+  Impl::t_openmp_instance->~Exec();
+  space.deallocate( Impl::t_openmp_instance, sizeof(Exec) );
+  Impl::t_openmp_instance = nullptr;
+  Impl::t_openmp_instance = tmp;
+
+  omp_set_num_threads(Impl::t_openmp_instance->m_pool_size);
+}
 
 template <typename F>
 void OpenMP::partition_master( F const& f
