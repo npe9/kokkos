@@ -41,16 +41,5 @@
 //@HEADER
 */
 
-#include <qthreads/TestQthreads.hpp>
-
-namespace Test {
-
-TEST_F( qthreads, impl_view_mapping_a )
-{
-#if 0
-  test_view_mapping< Kokkos::Qthreads >();
-  test_view_mapping_operator< Kokkos::Qthreads >();
-#endif
-}
-
-} // namespace Test
+#include <qthreads/TestQqthreads_Category.hpp>
+#include <TestViewAPI_a.hpp>

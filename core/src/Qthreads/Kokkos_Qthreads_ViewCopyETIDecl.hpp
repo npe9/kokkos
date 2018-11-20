@@ -41,5 +41,17 @@
 //@HEADER
 */
 
-#include <qthreads/TestQqthreads_Category.hpp>
-#include <TestViewAPI_b.hpp>
+#ifndef KOKKOS_QTHREADS_VIEWETIDECL_HPP
+#define KOKKOS_QTHREADS_VIEWETIDECL_HPP
+
+namespace Kokkos {
+namespace Impl {
+#define KOKKOS_IMPL_VIEWCOPY_ETI_AVAIL_EXECSPACE Kokkos::Qthreads
+
+#include<eti/common/Kokkos_ViewFillCopyETIDecl_Macros.hpp>
+
+#undef KOKKOS_IMPL_VIEWCOPY_ETI_AVAIL_EXECSPACE
+}
+}
+#endif
+
