@@ -53,20 +53,16 @@
 #define QTHREAD_LOCAL_PRIORITY
 #define CLONED_TASKS
 
-#include <qthread.h>
+#include <qthread/qthread.h>
 
 #include <cstddef>
 #include <iosfwd>
-
 #include <Kokkos_HostSpace.hpp>
 #include <Kokkos_ScratchSpace.hpp>
-#include <Kokkos_Parallel.hpp>
-//#include <Kokkos_MemoryTraits.hpp>
-//#include <Kokkos_ExecPolicy.hpp>
-//#include <Kokkos_TaskScheduler.hpp> // Uncomment when Tasking working.
 #include <Kokkos_Layout.hpp>
+#include <Kokkos_MemoryTraits.hpp>
+// #include <Kokkos_TaskScheduler.hpp> // Uncomment when Tasking working.
 #include <impl/Kokkos_Tags.hpp>
-#include <KokkosExp_MDRangePolicy.hpp>
 
 /*--------------------------------------------------------------------------*/
 
@@ -103,56 +99,109 @@ public:
 
   //@}
   /*------------------------------------------------------------------------*/
+  //! \name Static functions that all Kokkos devices must implement.
+  //@{
 
-  /** \brief  Initialization will construct one or more instances */
-  static Qthreads & instance( int = 0 );
-
-  /** \brief  Set the execution space to a "sleep" state.
-   *
-   * This function sets the "sleep" state in which it is not ready for work.
-   * This may consume less resources than in an "ready" state,
-   * but it may also take time to transition to the "ready" state.
-   *
-   * \return True if enters or is in the "sleep" state.
-   *         False if functions are currently executing.
-   */
-  bool sleep();
-
-  /** \brief  Wake from the sleep state.
-   *
-   *  \return True if enters or is in the "ready" state.
-   *          False if functions are currently executing.
-   */
-  static bool wake();
-
-  /** \brief Wait until all dispatched functions to complete.
-   *
-   *  The parallel_for or parallel_reduce dispatch of a functor may
-   *  return asynchronously, before the functor completes.  This
-   *  method does not return until all dispatched functors on this
-   *  device have completed.
-   */
-  static void fence();
-
-  /*------------------------------------------------------------------------*/
-
+  /// \brief True if and only if this method is being called in a
+  ///   thread-parallel function.
   static int in_parallel();
 
-  static int is_initialized();
+  /// \brief Print configuration information to the given output stream.
+  static void print_configuration( std::ostream & , const bool detail = false );
+
+  /// \brief Wait until all dispatched functors complete.
+  ///
+  /// The parallel_for or parallel_reduce dispatch of a functor may
+  /// return asynchronously, before the functor completes.  This
+  /// method does not return until all dispatched functors on this
+  /// device have completed.
+  static void fence();
 
   /** \brief  Return maximum amount of concurrency */
   static int concurrency();
-
-  static void initialize( int thread_count );
-  static void finalize();
-
-  /** \brief Print configuration information to the given output stream. */
-  static void print_configuration( std::ostream &, const bool detail = false );
 
   int shepherd_size() const;
   int shepherd_worker_size() const;
 
   static const char* name();
+
+  #ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+  bool sleep();
+
+  static bool wake();
+
+  static void finalize();
+
+  static void initialize( unsigned threads_count = 0 ,
+                          unsigned use_numa_count = 0 ,
+                          unsigned use_cores_per_numa = 0 ,
+                          bool allow_asynchronous_threadpool = false );
+
+  static int is_initialized();
+
+  static Qthreads & instance( int = 0 );
+
+  //----------------------------------------
+
+  static int thread_pool_size( int depth = 0 );
+#if defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
+  static int thread_pool_rank();
+#else
+  KOKKOS_INLINE_FUNCTION static int thread_pool_rank() { return 0 ; }
+#endif
+
+  inline static unsigned max_hardware_threads() { return thread_pool_size(0); }
+  KOKKOS_INLINE_FUNCTION static unsigned hardware_thread_id() { return thread_pool_rank(); }
+#else
+  /// \brief Free any resources being consumed by the device.
+  ///
+  /// For the Threads device, this terminates spawned worker threads.
+  static void impl_finalize();
+
+  //@}
+  /*------------------------------------------------------------------------*/
+  /*------------------------------------------------------------------------*/
+  //! \name Space-specific functions
+  //@{
+
+  /** \brief Initialize the device in the "ready to work" state.
+   *
+   *  The device is initialized in a "ready to work" or "awake" state.
+   *  This state reduces latency and thus improves performance when
+   *  dispatching work.  However, the "awake" state consumes resources
+   *  even when no work is being done.  You may call sleep() to put
+   *  the device in a "sleeping" state that does not consume as many
+   *  resources, but it will take time (latency) to awaken the device
+   *  again (via the wake()) method so that it is ready for work.
+   *
+   *  Teams of threads are distributed as evenly as possible across
+   *  the requested number of numa regions and cores per numa region.
+   *  A team will not be split across a numa region.
+   *
+   *  If the 'use_' arguments are not supplied the hwloc is queried
+   *  to use all available cores.
+   */
+  static void impl_initialize( unsigned threads_count = 0 ,
+                          unsigned use_numa_count = 0 ,
+                          unsigned use_cores_per_numa = 0 ,
+                          bool allow_asynchronous_threadpool = false );
+
+  static int impl_is_initialized();
+
+  static Threads & impl_instance( int = 0 );
+
+  //----------------------------------------
+
+  static int impl_thread_pool_size( int depth = 0 );
+#if defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
+  static int impl_thread_pool_rank();
+#else
+  KOKKOS_INLINE_FUNCTION static int impl_thread_pool_rank() { return 0 ; }
+#endif
+
+  inline static unsigned impl_max_hardware_threads() { return impl_thread_pool_size(0); }
+  KOKKOS_INLINE_FUNCTION static unsigned impl_hardware_thread_id() { return impl_thread_pool_rank(); }
+#endif
 };
 
 } // namespace Kokkos
@@ -191,10 +240,19 @@ struct VerifyExecutionCanAccessMemorySpace
 
 /*--------------------------------------------------------------------------*/
 
+#include <Kokkos_ExecPolicy.hpp>
+#include <Kokkos_Parallel.hpp>
+//#include <Qthreads/Kokkos_QthreadsTeam.hpp> // Uncomment when Tasking working.
 #include <Qthreads/Kokkos_QthreadsExec.hpp>
 #include <Qthreads/Kokkos_Qthreads_Parallel.hpp>
 //#include <Qthreads/Kokkos_Qthreads_Task.hpp> // Uncomment when Tasking working.
 //#include <Qthreads/Kokkos_Qthreads_TaskQueue.hpp> // Uncomment when Tasking working.
+
+
+//#include <KokkosExp_MDRangePolicy.hpp>
+
+//----------------------------------------------------------------------------
+//----------------------------------------------------------------------------
 
 #endif // #define KOKKOS_ENABLE_QTHREADS
 #endif // #define KOKKOS_QTHREADS_HPP
