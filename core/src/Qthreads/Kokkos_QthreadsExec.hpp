@@ -47,12 +47,12 @@
 #include <Kokkos_Macros.hpp>
 #if defined( KOKKOS_ENABLE_QTHREADS )
 
+#include <unistd.h>
 #include <impl/Kokkos_Spinwait.hpp>
 
 //----------------------------------------------------------------------------
 
 namespace Kokkos {
-
 namespace Impl {
 
 class QthreadsExec;
@@ -61,7 +61,17 @@ typedef void (*QthreadsExecFunctionPointer)( QthreadsExec &, const void * );
 
 class QthreadsExec {
 private:
-  enum { Inactive = 0, Active = 1 };
+
+  /** \brief States of a worker thread */
+  enum { Terminating ///<  Termination in progress
+         , Inactive    ///<  Exists, waiting for work
+         , Active      ///<  Exists, performing work
+         , Rendezvous  ///<  Exists, waiting in a barrier or reduce
+
+         , ScanCompleted
+         , ScanAvailable
+         , ReductionAvailable
+  };
 
   const QthreadsExec * const * m_worker_base;
   const QthreadsExec * const * m_shepherd_base;
@@ -81,6 +91,10 @@ private:
    */
   int     m_worker_rank;
   int     m_worker_size;
+
+  // This thread's owned work_range
+  Kokkos::pair<long,long> m_work_range __attribute__((aligned(16))) ;
+  long m_team_work_index;
 
   int mutable volatile m_worker_state;
 
@@ -102,14 +116,14 @@ public:
     const int rev_rank = m_worker_size - ( m_worker_rank + 1 );
 
     int n, j;
-
+    std::cout << "execall barriering\n";
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
-      Impl::spinwait_while_equal( m_worker_base[j]->m_worker_state, QthreadsExec::Active );
+      Impl::spinwait_while_equal<int>( m_worker_base[j]->m_worker_state, QthreadsExec::Active );
     }
 
     if ( rev_rank ) {
       m_worker_state = QthreadsExec::Inactive;
-      Impl::spinwait_while_equal( m_worker_state, QthreadsExec::Inactive );
+      Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
     }
 
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
@@ -120,6 +134,8 @@ public:
   /** Barrier across workers within the shepherd with rank < team_rank. */
   void shepherd_barrier( const int team_size ) const
   {
+
+    std::cout << "shepherd barriering\n";
     if ( m_shepherd_worker_rank < team_size ) {
 
       const int rev_rank = team_size - ( m_shepherd_worker_rank + 1 );
@@ -127,12 +143,12 @@ public:
       int n, j;
 
       for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < team_size ); n <<= 1 ) {
-        Impl::spinwait_while_equal( m_shepherd_base[j]->m_worker_state, QthreadsExec::Active );
+        Impl::spinwait_while_equal<int>( m_shepherd_base[j]->m_worker_state, QthreadsExec::Active );
       }
 
       if ( rev_rank ) {
         m_worker_state = QthreadsExec::Inactive;
-        Impl::spinwait_while_equal( m_worker_state, QthreadsExec::Inactive );
+        Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
       }
 
       for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < team_size ); n <<= 1 ) {
@@ -140,6 +156,22 @@ public:
       }
     }
   }
+
+  static int  in_parallel();
+
+  static int is_initialized();
+
+  static void fence();
+  //static bool sleep();
+  static bool wake();
+  static void finalize();
+  static void initialize (
+    unsigned thread_count ,
+    unsigned use_numa_count ,
+    unsigned use_cores_per_numa ,
+    bool allow_asynchronous_threadpool );
+
+  static void print_configuration( std::ostream & , const bool detail = false );
 
   /** Reduce across all workers participating in the 'exec_all'. */
   template< class FunctorType, class ReducerType, class ArgTag >
@@ -150,26 +182,39 @@ public:
     typedef typename ReducerConditional::type ReducerTypeFwd;
     typedef Kokkos::Impl::FunctorValueJoin< ReducerTypeFwd, ArgTag > ValueJoin;
 
+    std::cout << "exec all reducing\n";
     const int rev_rank = m_worker_size - ( m_worker_rank + 1 );
 
     int n, j;
 
+    //std::cout << "*m_scratch_alloc " << *m_scratch_alloc << std::endl; //<< " *m_worker_base[1].m_scratch_alloc " << *m_worker_base[1]->m_scratch_alloc << std::endl;
+    std::cout << "rev_rank " << rev_rank << " m_worker_size " << m_worker_size << std::endl;
+    //std::cout << "rev_rank " << rev_rank << " n " << 1 << " rev_rank & n " << rev_rank & 1 << " m_worker_size " << m_worker_size << std::endl;
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
       const QthreadsExec & fan = *m_worker_base[j];
 
-      Impl::spinwait_while_equal( fan.m_worker_state, QthreadsExec::Active );
+      Impl::spinwait_while_equal<int>( fan.m_worker_state, QthreadsExec::Active );
 
       ValueJoin::join( ReducerConditional::select( func, reduce ), m_scratch_alloc, fan.m_scratch_alloc );
+      std::cout << "m_scratch_alloc " << m_scratch_alloc << " fan.m_scratch_alloc " << fan.m_scratch_alloc << std::endl;
     }
 
+    std::cout << "rev_rank 1 " << rev_rank << " m_worker_size " << m_worker_size << std::endl;
     if ( rev_rank ) {
+      printf("m_worker_state %d\n", m_worker_state);
       m_worker_state = QthreadsExec::Inactive;
-      Impl::spinwait_while_equal( m_worker_state, QthreadsExec::Inactive );
+      printf("spinwaiting\n");
+      sleep(1);
+      //Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
+      printf("spinwaited\n");
     }
 
+    std::cout << "for rev_rank 1 " << rev_rank << " m_worker_size " << m_worker_size << std::endl;
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
-      m_worker_base[j]->m_worker_state = QthreadsExec::Active;
+      printf("m_worker_base %p n %d\n", m_worker_base, n);
+      //m_worker_base[j]->m_worker_state = QthreadsExec::Active;
     }
+    std::cout << "done\n";
   }
 
   /** Scan across all workers participating in the 'exec_all'. */
@@ -181,17 +226,18 @@ public:
     typedef Kokkos::Impl::FunctorValueJoin< FunctorType, ArgTag > ValueJoin;
     typedef Kokkos::Impl::FunctorValueOps<  FunctorType, ArgTag > ValueOps;
 
+    std::cout << "exec all scanning\n";
     const int rev_rank = m_worker_size - ( m_worker_rank + 1 );
 
     int n, j;
 
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
-      Impl::spinwait_while_equal( m_worker_base[j]->m_worker_state, QthreadsExec::Active );
+      Impl::spinwait_while_equal<int>( m_worker_base[j]->m_worker_state, QthreadsExec::Active );
     }
 
     if ( rev_rank ) {
       m_worker_state = QthreadsExec::Inactive;
-      Impl::spinwait_while_equal( m_worker_state, QthreadsExec::Inactive );
+      Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
     }
     else {
       // Root thread scans across values before releasing threads.
@@ -231,6 +277,8 @@ public:
   inline
   void shepherd_broadcast( Type & value, const int team_size, const int team_rank ) const
   {
+
+    std::cout << "shepherd broadcasting\n";
     if ( m_shepherd_base ) {
       Type * const shared_value = m_shepherd_base[0]->shepherd_team_scratch_value<Type>();
       if ( m_shepherd_worker_rank == team_rank ) { *shared_value = value; }
@@ -246,8 +294,9 @@ public:
   {
     volatile Type * const shared_value = shepherd_team_scratch_value<Type>();
     *shared_value = value;
-//    *shepherd_team_scratch_value<Type>() = value;
+    *shepherd_team_scratch_value<Type>() = value;
 
+    std::cout << "shepherd reducing 1\n";
     memory_fence();
 
     const int rev_rank = team_size - ( m_shepherd_worker_rank + 1 );
@@ -255,12 +304,12 @@ public:
     int n, j;
 
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < team_size ); n <<= 1 ) {
-      Impl::spinwait_while_equal( m_shepherd_base[j]->m_worker_state, QthreadsExec::Active );
+      Impl::spinwait_while_equal<int>( m_shepherd_base[j]->m_worker_state, QthreadsExec::Active );
     }
 
     if ( rev_rank ) {
       m_worker_state = QthreadsExec::Inactive;
-      Impl::spinwait_while_equal( m_worker_state, QthreadsExec::Inactive );
+      Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
     }
     else {
       Type & accum = *m_shepherd_base[0]->shepherd_team_scratch_value<Type>();
@@ -290,9 +339,10 @@ public:
   {
     typedef typename JoinOp::value_type Type;
 
+    std::cout << "shepherd reducing 2\n";
     volatile Type * const shared_value = shepherd_team_scratch_value<Type>();
     *shared_value = value;
-//    *shepherd_team_scratch_value<Type>() = value;
+    *shepherd_team_scratch_value<Type>() = value;
 
     memory_fence();
 
@@ -301,12 +351,12 @@ public:
     int n, j;
 
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < team_size ); n <<= 1 ) {
-      Impl::spinwait_while_equal( m_shepherd_base[j]->m_worker_state, QthreadsExec::Active );
+      Impl::spinwait_while_equal<int>( m_shepherd_base[j]->m_worker_state, QthreadsExec::Active );
     }
 
     if ( rev_rank ) {
       m_worker_state = QthreadsExec::Inactive;
-      Impl::spinwait_while_equal( m_worker_state, QthreadsExec::Inactive );
+      Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
     }
     else {
       volatile Type & accum = *m_shepherd_base[0]->shepherd_team_scratch_value<Type>();
@@ -337,17 +387,18 @@ public:
 
     memory_fence();
 
+    std::cout << "shepherd scan 1\n";
     const int rev_rank = team_size - ( m_shepherd_worker_rank + 1 );
 
     int n, j;
 
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < team_size ); n <<= 1 ) {
-      Impl::spinwait_while_equal( m_shepherd_base[j]->m_worker_state, QthreadsExec::Active );
+      Impl::spinwait_while_equal<int>( m_shepherd_base[j]->m_worker_state, QthreadsExec::Active );
     }
 
     if ( rev_rank ) {
       m_worker_state = QthreadsExec::Inactive;
-      Impl::spinwait_while_equal( m_worker_state, QthreadsExec::Inactive );
+      Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
     }
     else {
       // Root thread scans across values before releasing threads.
@@ -393,7 +444,63 @@ public:
 
   void shared_reset( Qthreads::scratch_memory_space & );
 
-  void * exec_all_reduce_value() const { return m_scratch_alloc; }
+  void * exec_all_reduce_value() const {
+    std::cout << "exec all reduce value 1\n";
+    return m_scratch_alloc; }
+
+  /* Dynamic Scheduling related functionality */
+  // Initialize the work range for this thread
+  inline void set_work_range(const long& begin, const long& end, const long& chunk_size) {
+    m_work_range.first = (begin+chunk_size-1)/chunk_size;
+    m_work_range.second = end>0?(end+chunk_size-1)/chunk_size:m_work_range.first;
+  }
+
+  // Claim and index from this thread's range from the beginning
+  inline long get_work_index_begin () {
+    Kokkos::pair<long,long> work_range_new = m_work_range;
+    Kokkos::pair<long,long> work_range_old = work_range_new;
+    if(work_range_old.first>=work_range_old.second)
+      return -1;
+
+    work_range_new.first+=1;
+
+    bool success = false;
+    while(!success) {
+      work_range_new = Kokkos::atomic_compare_exchange(&m_work_range,work_range_old,work_range_new);
+      success = ( (work_range_new == work_range_old) ||
+                  (work_range_new.first>=work_range_new.second));
+      work_range_old = work_range_new;
+      work_range_new.first+=1;
+    }
+    if(work_range_old.first<work_range_old.second)
+      return work_range_old.first;
+    else
+      return -1;
+  }
+
+  // Claim and index from this thread's range from the end
+  inline long get_work_index_end () {
+    Kokkos::pair<long,long> work_range_new = m_work_range;
+    Kokkos::pair<long,long> work_range_old = work_range_new;
+    if(work_range_old.first>=work_range_old.second)
+      return -1;
+    work_range_new.second-=1;
+    bool success = false;
+    while(!success) {
+      work_range_new = Kokkos::atomic_compare_exchange(&m_work_range,work_range_old,work_range_new);
+      success = ( (work_range_new == work_range_old) ||
+                  (work_range_new.first>=work_range_new.second) );
+      work_range_old = work_range_new;
+      work_range_new.second-=1;
+    }
+    if(work_range_old.first<work_range_old.second)
+      return work_range_old.second-1;
+    else
+      return -1;
+  }
+
+  long get_work_index() { return 1; }
+  long steal_work_index() { return 1; }
 
   static void * exec_all_reduce_result();
 
@@ -638,6 +745,63 @@ public:
 
 } // namespace Kokkos
 
+//----------------------------------------------------------------------------
+//----------------------------------------------------------------------------
+
+namespace Kokkos {
+
+inline int Qthreads::in_parallel()
+{ return Impl::QthreadsExec::in_parallel(); }
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+inline int Qthreads::is_initialized()
+{ return Impl::QthreadsExec::is_initialized(); }
+#else
+inline int Qthreads::impl_is_initialized()
+{ return Impl::QthreadsExec::is_initialized(); }
+#endif
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+inline void Qthreads::initialize(
+#else
+inline void Qthreads::impl_initialize(
+#endif
+  unsigned threads_count ,
+  unsigned use_numa_count ,
+  unsigned use_cores_per_numa ,
+  bool allow_asynchronous_threadpool )
+{
+  Impl::QthreadsExec::initialize( threads_count , use_numa_count , use_cores_per_numa , allow_asynchronous_threadpool );
+}
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+inline void Qthreads::finalize()
+#else
+inline void Qthreads::impl_finalize()
+#endif
+{
+  Impl::QthreadsExec::finalize();
+}
+
+inline void Qthreads::print_configuration( std::ostream & s , const bool detail )
+{
+  Impl::QthreadsExec::print_configuration( s , detail );
+}
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+//inline bool Qthreads::sleep()
+//{ return Impl::QthreadsExec::sleep() ; }
+
+inline bool Qthreads::wake()
+{ return Impl::QthreadsExec::wake() ; }
+#endif
+
+inline void Qthreads::fence()
+{ Impl::QthreadsExec::fence() ; }
+
+} /* namespace Kokkos */
+
+//----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 
 #endif

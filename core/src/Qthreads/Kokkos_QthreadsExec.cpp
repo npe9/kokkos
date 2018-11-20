@@ -106,115 +106,47 @@ const void                * volatile s_active_function_arg = 0;
 //----------------------------------------------------------------------------
 
 namespace Kokkos {
-
-int Qthreads::is_initialized()
-{
-  return Impl::s_number_workers != 0;
-}
-
-int Qthreads::concurrency()
-{
-  return Impl::s_number_workers_per_shepherd;
-}
-
-int Qthreads::in_parallel()
-{
-  return Impl::s_active_function != 0;
-}
-
-void Qthreads::initialize( int thread_count )
-{
-  // Environment variable: QTHREAD_NUM_SHEPHERDS
-  // Environment variable: QTHREAD_NUM_WORKERS_PER_SHEP
-  // Environment variable: QTHREAD_HWPAR
-
-  {
-    char buffer[256];
-    snprintf( buffer, sizeof(buffer), "QTHREAD_HWPAR=%d", thread_count );
-    putenv( buffer );
-  }
-
-  const bool ok_init = ( QTHREAD_SUCCESS == qthread_initialize() ) &&
-                       ( thread_count    == qthread_num_shepherds() * qthread_num_workers_local( NO_SHEPHERD ) ) &&
-                       ( thread_count    == qthread_num_workers() );
-
-  bool ok_symmetry = true;
-
-  if ( ok_init ) {
-    Impl::s_number_shepherds            = qthread_num_shepherds();
-    Impl::s_number_workers_per_shepherd = qthread_num_workers_local( NO_SHEPHERD );
-    Impl::s_number_workers              = Impl::s_number_shepherds * Impl::s_number_workers_per_shepherd;
-
-    for ( int i = 0; ok_symmetry && i < Impl::s_number_shepherds; ++i ) {
-      ok_symmetry = ( Impl::s_number_workers_per_shepherd == qthread_num_workers_local( i ) );
-    }
-  }
-
-  if ( ! ok_init || ! ok_symmetry ) {
-    std::ostringstream msg;
-
-    msg << "Kokkos::Qthreads::initialize(" << thread_count << ") FAILED";
-    msg << " : qthread_num_shepherds = " << qthread_num_shepherds();
-    msg << " : qthread_num_workers_per_shepherd = " << qthread_num_workers_local( NO_SHEPHERD );
-    msg << " : qthread_num_workers = " << qthread_num_workers();
-
-    if ( ! ok_symmetry ) {
-      msg << " : qthread_num_workers_local = {";
-      for ( int i = 0; i < Impl::s_number_shepherds; ++i ) {
-        msg << " " << qthread_num_workers_local( i );
-      }
-      msg << " }";
-    }
-
-    Impl::s_number_workers              = 0;
-    Impl::s_number_shepherds            = 0;
-    Impl::s_number_workers_per_shepherd = 0;
-
-    if ( ok_init ) { qthread_finalize(); }
-
-    Kokkos::Impl::throw_runtime_exception( msg.str() );
-  }
-
-  Impl::QthreadsExec::resize_worker_scratch( 256, 256 );
-
-  // Init the array for used for arbitrarily sized atomics.
-  Impl::init_lock_array_host_space();
-
-}
-
-void Qthreads::finalize()
-{
-  Impl::QthreadsExec::clear_workers();
-
-  if ( Impl::s_number_workers ) {
-    qthread_finalize();
-  }
-
-  Impl::s_number_workers              = 0;
-  Impl::s_number_shepherds            = 0;
-  Impl::s_number_workers_per_shepherd = 0;
-}
-
-void Qthreads::print_configuration( std::ostream & s, const bool detail )
-{
-  s << "Kokkos::Qthreads {"
-    << " num_shepherds(" << Impl::s_number_shepherds << ")"
-    << " num_workers_per_shepherd(" << Impl::s_number_workers_per_shepherd << ")"
-    << " }" << std::endl;
-}
-
-Qthreads & Qthreads::instance( int )
-{
-  static Qthreads q;
-  return q;
-}
-
-void Qthreads::fence()
-{
+int Qthreads::concurrency() {
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+    return thread_pool_size(0);
+#else
+    return impl_thread_pool_size(0);
+#endif
 }
 
 int Qthreads::shepherd_size() const { return Impl::s_number_shepherds; }
 int Qthreads::shepherd_worker_size() const { return Impl::s_number_workers_per_shepherd; }
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+  int Qthreads::thread_pool_size( int depth )
+#else
+  int Qthreads::impl_thread_pool_size( int depth )
+#endif
+{
+  return Impl::s_number_workers;
+}
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+int Qthreads::thread_pool_rank()
+#else
+int Qthreads::impl_thread_pool_rank()
+#endif
+{
+  const pthread_t pid = pthread_self();
+  int i = 0;
+  //while ( ( i < Impl::s_thread_pool_size[0] ) && ( pid != Impl::s_threads_pid[i] ) ) { ++i ; }
+  return i ;
+}
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+  Qthreads & Qthreads::instance(int)
+#else
+  Qthreads & Qthreads::impl_instance(int)
+#endif
+  {
+    static Qthreads q;
+    return q ;
+  }
+
 
 const char* Qthreads::name() { return "Qthreads"; }
 
@@ -304,7 +236,7 @@ void verify_is_process( const char * const label, bool not_active = false )
 {
   const bool not_process = 0 != qthread_shep() || 0 != qthread_worker_local( NULL );
   const bool is_active   = not_active && ( s_active_function || s_active_function_arg );
-
+  
   if ( not_process || is_active ) {
     std::string msg( label );
     msg.append( " : FAILED" );
@@ -339,6 +271,88 @@ QthreadsExec::QthreadsExec()
   m_worker_size          = s_number_workers;
   m_worker_state         = QthreadsExec::Active;
 }
+
+int QthreadsExec::is_initialized()
+//{ return 1; }
+{
+  //printf("%s: Impl::s_number_shepherds %d\n", __func__, Impl::s_number_shepherds);
+  return 0 !=  Impl::s_number_shepherds ; }
+
+void QthreadsExec::initialize(
+    unsigned threads_count ,
+    unsigned use_numa_count ,
+    unsigned use_cores_per_numa ,
+    bool allow_asynchronous_threadpool )
+{
+  printf("%s: initializing\n", __func__);
+  // This needs to be more clever.
+  // use_numa_count should default to zero.
+  // we should also care more about shepherds.
+  // and we should also default.
+  {
+    char buffer[256];
+    threads_count = threads_count ? threads_count : 1;
+    use_numa_count = use_numa_count ? use_numa_count : 1;
+
+    snprintf( buffer, sizeof(buffer), "QTHREAD_HWPAR=%d", threads_count  );
+    putenv( buffer );
+    snprintf( buffer, sizeof(buffer), "QTHREAD_NUM_SHEPHERDS=%d", use_numa_count );
+    putenv( buffer );
+    snprintf( buffer, sizeof(buffer), "QTHREAD_NUM_WORKERS_PER_SHEPHERD=%d", threads_count / use_numa_count );
+    putenv( buffer );
+  }
+  bool ok_init = ( QTHREAD_SUCCESS == qthread_initialize() ) &&
+                       ( threads_count    == qthread_num_shepherds() * qthread_num_workers_local( NO_SHEPHERD ) ) &&
+                       ( threads_count    == qthread_num_workers() );
+  ok_init = true;
+  bool ok_symmetry = true;
+
+  if ( ok_init ) {
+    Impl::s_number_shepherds            = qthread_num_shepherds();
+    Impl::s_number_workers_per_shepherd = qthread_num_workers_local( NO_SHEPHERD );
+    Impl::s_number_workers              = Impl::s_number_shepherds * Impl::s_number_workers_per_shepherd;
+
+    for ( int i = 0; ok_symmetry && i < Impl::s_number_shepherds; ++i ) {
+      ok_symmetry = ( Impl::s_number_workers_per_shepherd == qthread_num_workers_local( i ) );
+    }
+  }
+
+  if ( ! ok_init || ! ok_symmetry ) {
+    std::ostringstream msg;
+
+    msg << "Kokkos::Qthreads::initialize(" << threads_count << " , " << use_numa_count << " , " << use_cores_per_numa << ") FAILED";
+    msg << " : qthread_num_shepherds = " << qthread_num_shepherds();
+    msg << " : qthread_num_workers_per_shepherd = " << qthread_num_workers_local( NO_SHEPHERD );
+    msg << " : qthread_num_workers = " << qthread_num_workers();
+
+    if ( ! ok_symmetry ) {
+      msg << " : qthread_num_workers_local = {";
+      for ( int i = 0; i < Impl::s_number_shepherds; ++i ) {
+        msg << " " << qthread_num_workers_local( i );
+      }
+      msg << " }";
+    }
+    printf("%s: %s\n", __func__, msg.str().c_str());
+    Impl::s_number_workers              = 0;
+    Impl::s_number_shepherds            = 0;
+    Impl::s_number_workers_per_shepherd = 0;
+
+    if ( ok_init ) { qthread_finalize(); }
+
+    Kokkos::Impl::throw_runtime_exception( msg.str() );
+  }
+
+  Impl::QthreadsExec::resize_worker_scratch( 256, 256 );
+
+  // Init the array for used for arbitrarily sized atomics.
+  Impl::init_lock_array_host_space();
+
+}
+
+void QthreadsExec::fence()
+{
+}
+
 
 void QthreadsExec::clear_workers()
 {
@@ -430,6 +444,12 @@ void QthreadsExec::resize_worker_scratch( const int reduce_size, const int share
   }
 }
 
+
+int QthreadsExec::in_parallel()
+{
+  return Impl::s_active_function != 0;
+}
+
 void QthreadsExec::exec_all( Qthreads &, QthreadsExecFunctionPointer func, const void * arg )
 {
   verify_is_process("QthreadsExec::exec_all(...)",true);
@@ -482,6 +502,21 @@ void * QthreadsExec::exec_all_reduce_result()
 {
   return s_exec[0]->m_scratch_alloc;
 }
+void QthreadsExec::finalize()
+{
+  printf("clearing workers\n");
+  Impl::QthreadsExec::clear_workers();
+
+  printf("finalize workers?\n");
+  if ( Impl::s_number_workers ) {
+    qthread_finalize();
+  }
+
+  printf("qthread_finalized\n");
+  Impl::s_number_workers              = 0;
+  Impl::s_number_shepherds            = 0;
+  Impl::s_number_workers_per_shepherd = 0;
+}
 
 } // namespace Impl
 
@@ -513,6 +548,14 @@ QthreadsTeamPolicyMember::QthreadsTeamPolicyMember( const QthreadsTeamPolicyMemb
   , m_league_rank( 0 )
 {
   m_exec.shared_reset( m_team_shared );
+}
+
+void QthreadsExec::print_configuration( std::ostream & s, const bool detail )
+{
+  s << "Kokkos::Qthreads {"
+    << " num_shepherds(" << Impl::s_number_shepherds << ")"
+    << " num_workers_per_shepherd(" << Impl::s_number_workers_per_shepherd << ")"
+    << " }" << std::endl;
 }
 
 } // namespace Impl
