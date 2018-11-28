@@ -85,10 +85,13 @@ setenv("MEMKIND_HBW_NODES", "1", 0);
   }
 
   // Protect declarations, to prevent "unused variable" warnings.
-#if defined( KOKKOS_ENABLE_OPENMP ) || defined( KOKKOS_ENABLE_THREADS ) || defined( KOKKOS_ENABLE_OPENMPTARGET )
+  //
+  printf("initializing internal\n");
+#if defined( KOKKOS_ENABLE_OPENMP ) || defined( KOKKOS_ENABLE_THREADS ) || defined( KOKKOS_ENABLE_OPENMPTARGET ) || defined ( KOKKOS_ENABLE_QTHREADS )
+  printf("enabling num_threads\n");
   const int num_threads = args.num_threads;
 #endif
-#if defined( KOKKOS_ENABLE_THREADS ) || defined( KOKKOS_ENABLE_OPENMPTARGET )
+#if defined( KOKKOS_ENABLE_THREADS ) || defined( KOKKOS_ENABLE_OPENMPTARGET ) || defined ( KOKKOS_ENABLE_QTHREADS )
   const int use_numa = args.num_numa;
 #endif
 #if defined( KOKKOS_ENABLE_CUDA ) || defined( KOKKOS_ENABLE_ROCM )
@@ -152,12 +155,47 @@ setenv("MEMKIND_HBW_NODES", "1", 0);
       Kokkos::Threads::impl_initialize();
     }
 #endif
+
+
     //std::cout << "Kokkos::initialize() fyi: Pthread enabled and initialized" << std::endl ;
   }
   else {
     //std::cout << "Kokkos::initialize() fyi: Pthread enabled but not initialized" << std::endl ;
   }
 #endif
+
+#if defined( KOKKOS_ENABLE_QTHREADS )
+  if( std::is_same< Kokkos::Qthreads , Kokkos::DefaultExecutionSpace >::value ||
+      std::is_same< Kokkos::Qthreads , Kokkos::HostSpace::execution_space >::value ) {
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+    if(num_threads>0) {
+      if(use_numa>0) {
+        Kokkos::Qthreads::initialize(num_threads,use_numa);
+      }
+      else {
+        Kokkos::Qthreads::initialize(num_threads);
+      }
+    } else {
+      Kokkos::Qthreads::initialize();
+    }
+#else
+    if(num_threads>0) {
+      if(use_numa>0) {
+        Kokkos::Qthreads::impl_initialize(num_threads,use_numa);
+      }
+      else {
+        Kokkos::Qthreads::impl_initialize(num_threads);
+      }
+    } else {
+      Kokkos::Qthreads::impl_initialize();
+    }
+#endif
+    std::cout << "Kokkos::initialize() fyi: Qthreads enabled and initialized" << std::endl ;
+  }
+  else {
+    std::cout << "Kokkos::initialize() fyi: Qthreads enabled but not initialized" << std::endl ;
+  }
+#endif 
 
 #if defined( KOKKOS_ENABLE_SERIAL )
   // Prevent "unused variable" warning for 'args' input struct.  If
@@ -307,6 +345,23 @@ void finalize_internal( const bool all_spaces = false )
 #else
     if(Kokkos::Threads::impl_is_initialized())
       Kokkos::Threads::impl_finalize();
+#endif
+
+
+
+  }
+#endif
+
+#if defined( KOKKOS_ENABLE_QTHREADS )
+  if( std::is_same< Kokkos::Qthreads , Kokkos::DefaultExecutionSpace >::value ||
+      std::is_same< Kokkos::Qthreads , Kokkos::HostSpace::execution_space >::value ||
+      all_spaces ) {
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+    if(Kokkos::Qthreads::is_initialized())
+      Kokkos::Qthreads::finalize();
+#else
+    if(Kokkos::Qthreads::impl_is_initialized())
+      Kokkos::Qthreads::impl_finalize();
 #endif
   }
 #endif
