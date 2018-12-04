@@ -165,7 +165,7 @@ setenv("MEMKIND_HBW_NODES", "1", 0);
 #endif
 
 #if defined( KOKKOS_ENABLE_QTHREADS )
-  if( std::is_same< Kokkos::Qthreads , Kokkos::DefaultExecutionSpace >::value ||
+  if(1 || std::is_same< Kokkos::Qthreads , Kokkos::DefaultExecutionSpace >::value ||
       std::is_same< Kokkos::Qthreads , Kokkos::HostSpace::execution_space >::value ) {
 #ifdef KOKKOS_ENABLE_DEPRECATED_CODE
     if(num_threads>0) {
