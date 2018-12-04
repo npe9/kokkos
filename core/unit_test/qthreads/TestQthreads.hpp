@@ -57,7 +57,6 @@
 
 #include <TestTile.hpp>
 #include <TestSharedAlloc.hpp>
-#include <TestViewMapping.hpp>
 #include <TestViewAPI.hpp>
 #include <TestViewOfClass.hpp>
 #include <TestViewSubview.hpp>
@@ -71,7 +70,7 @@
 #include <TestAggregate.hpp>
 #include <TestCompilerMacros.hpp>
 #include <TestTaskScheduler.hpp>
-#include <TestMemoryPool.hpp>
+//#include <TestMemoryPool.hpp>
 #include <TestCXX11.hpp>
 #include <TestCXX11Deduction.hpp>
 #include <TestTeamVector.hpp>

@@ -58,8 +58,33 @@
 #ifdef KOKKOS_ENABLE_THREADS
 #include <threads/TestThreads_Category.hpp>
 #endif
+#ifdef KOKKOS_ENABLE_QTHREADS
+#include <qthreads/TestQthreads_Category.hpp>
+#endif
 
+#include <TestTile.hpp>
+#include <TestSharedAlloc.hpp>
+//#include <TestViewMapping.hpp>
+#include <TestViewAPI.hpp>
+#include <TestViewOfClass.hpp>
+#include <TestViewSubview.hpp>
+#include <TestAtomic.hpp>
+#include <TestAtomicOperations.hpp>
+#include <TestAtomicViews.hpp>
+#include <TestRange.hpp>
+//#include <TestTeam.hpp>
+//#include <TestReduce.hpp>
+#include <TestScan.hpp>
+#include <TestAggregate.hpp>
+#include <TestCompilerMacros.hpp>
+//#include <TestTaskScheduler.hpp>
 #include <TestMemoryPool.hpp>
+//#include <TestTeamVector.hpp>
+#include <TestTemplateMetaFunctions.hpp>
+//#include <TestPolicyConstruction.hpp>
+#include <TestMDRange.hpp>
+#include <TestConcurrentBitset.hpp>
+
 
 int main( int argc, char *argv[] ) {
   Kokkos::initialize(argc,argv);

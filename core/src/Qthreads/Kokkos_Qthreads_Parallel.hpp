@@ -88,7 +88,8 @@ private:
   inline static
   typename std::enable_if< std::is_same< TagType , void >::value >::type
   exec_range( const FunctorType & functor ,
-              const Member ibeg , const Member iend )
+              //              const Member ibeg , const Member iend )
+    const Member ibeg , const Member iend )
     {
 #if defined( KOKKOS_ENABLE_AGGRESSIVE_VECTORIZATION ) &&  \
   defined( KOKKOS_ENABLE_PRAGMA_IVDEP )
@@ -236,10 +237,10 @@ private:
     const ParallelFor & self = * ((const ParallelFor *) arg );
 
     WorkRange range( self.m_policy , exec.worker_rank() , exec.worker_size() );
-
+    printf("%s: exec_range", __func__);
     ParallelFor::exec_range
       ( self.m_mdr_policy, self.m_functor , range.begin() , range.end() );
-
+    printf("%s: exec_ranged", __func__);
     //exec.fan_in();
   }
 
@@ -368,7 +369,7 @@ private:
     ParallelFor::exec_team< WorkTag , typename Policy::schedule_type::type >
       ( self.m_functor , Member( & exec , self.m_policy , self.m_shared ) );
 
-    exec.barrier();
+    //exec.barrier();
     //exec.fan_in();
   }
 
@@ -540,9 +541,9 @@ public:
 
         const unsigned n = ValueTraits::value_count( ReducerConditional::select(m_functor , m_reducer) );
         for ( unsigned i = 0 ; i < n ; ++i ) {
-          std::cout << "data " << data[i] << std::endl;
+        //  std::cout << "data " << data[i] << std::endl;
           m_result_ptr[i] = data[i];
-          std::cout << "m_result_ptr " << m_result_ptr[i] << std::endl;
+        //  std::cout << "m_result_ptr " << m_result_ptr[i] << std::endl;
         }
       }
       printf("executed parallel reduce\n");
@@ -904,7 +905,7 @@ public:
 
       printf("executing parallel scan\n");
       QthreadsExec::resize_worker_scratch( 2 * ValueTraits::value_size( m_functor ) , 0 );
-      QthreadsExec::exec_all(Qthreads::instance(), & ParallelFor::exec , this );
+      //QthreadsExec::exec_all(Qthreads::instance(), & ParallelFor::exec , this );
       //QthreadsExec::start( & ParallelScanWithTotal::exec , this );
       //QthreadsExec::fence();
     }

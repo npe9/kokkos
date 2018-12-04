@@ -120,7 +120,6 @@ public:
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
       Impl::spinwait_while_equal<int>( m_worker_base[j]->m_worker_state, QthreadsExec::Active );
     }
-
     if ( rev_rank ) {
       m_worker_state = QthreadsExec::Inactive;
       Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
@@ -130,7 +129,6 @@ public:
       m_worker_base[j]->m_worker_state = QthreadsExec::Active;
     }
   }
-
   /** Barrier across workers within the shepherd with rank < team_rank. */
   void shepherd_barrier( const int team_size ) const
   {
@@ -773,6 +771,38 @@ inline void Qthreads::impl_initialize(
 {
   Impl::QthreadsExec::initialize( threads_count , use_numa_count , use_cores_per_numa , allow_asynchronous_threadpool );
 }
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+inline void Qthreads::initialize(
+#else
+inline void Qthreads::impl_initialize(
+#endif
+                                      unsigned threads_count ,
+                                      unsigned use_numa_count )
+{
+  Impl::QthreadsExec::initialize( threads_count , use_numa_count , threads_count, false );
+}
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+inline void Qthreads::initialize(
+#else
+inline void Qthreads::impl_initialize(
+#endif
+                                      unsigned threads_count )
+{
+  Impl::QthreadsExec::initialize( threads_count , 1 , threads_count, false);
+}
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
+inline void Qthreads::initialize(
+#else
+inline void Qthreads::impl_initialize(
+#endif
+                                      )
+{
+  Impl::QthreadsExec::initialize( std::thread::hardware_concurrency(), 1 ,  std::thread::hardware_concurrency(), false);
+}
+
+
 
 #ifdef KOKKOS_ENABLE_DEPRECATED_CODE
 inline void Qthreads::finalize()

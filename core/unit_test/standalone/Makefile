@@ -1,4 +1,4 @@
-KOKKOS_DEVICES=Cuda
+KOKKOS_DEVICES=Qthreads
 KOKKOS_CUDA_OPTIONS=enable_lambda
 KOKKOS_ARCH = "SNB,Kepler35"
 
@@ -25,13 +25,13 @@ CXX = g++
 EXE = test.host
 endif
 
-CXXFLAGS ?= -O3 -g
-override CXXFLAGS += -I$(MAKEFILE_PATH) -I$(KOKKOS_PATH)/core/unit_test -I$(KOKKOS_PATH)/tpls/gtest -DTESTFILE=$(TESTFILE)
+CXXFLAGS ?= -O1 -g
+override CXXFLAGS += -I$(MAKEFILE_PATH) -I$(KOKKOS_PATH)/core/unit_test -I$(KOKKOS_PATH)/tpls/gtest -DTESTFILE=$(TESTFILE) -I$(HOME)/qthreads/include -L$(HOME)/qthreads/lib
 #SRC += $(KOKKOS_PATH)/tpls/gtest/gtest/gtest-all.cc
 
 DEPFLAGS = -M
 LINK = ${CXX}
-LINKFLAGS =
+LINKFLAGS = -L$(HOME)/qthreads/lib 
 
 OBJ = $(notdir $(SRC:.cpp=.o))
 LIB =
