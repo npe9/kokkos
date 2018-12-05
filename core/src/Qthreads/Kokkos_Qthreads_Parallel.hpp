@@ -368,7 +368,7 @@ private:
     ParallelFor::exec_team< WorkTag , typename Policy::schedule_type::type >
       ( self.m_functor , Member( & exec , self.m_policy , self.m_shared ) );
 
-    exec.barrier();
+    //exec.barrier();
     //exec.fan_in();
   }
 
@@ -904,7 +904,7 @@ public:
 
       printf("executing parallel scan\n");
       QthreadsExec::resize_worker_scratch( 2 * ValueTraits::value_size( m_functor ) , 0 );
-      QthreadsExec::exec_all(Qthreads::instance(), & ParallelFor::exec , this );
+      //QthreadsExec::exec_all(Qthreads::instance(), & ParallelFor::exec , this );
       //QthreadsExec::start( & ParallelScanWithTotal::exec , this );
       //QthreadsExec::fence();
     }
