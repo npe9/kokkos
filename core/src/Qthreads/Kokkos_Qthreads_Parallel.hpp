@@ -95,6 +95,7 @@ private:
   defined( KOKKOS_ENABLE_PRAGMA_IVDEP )
 #pragma ivdep
 #endif
+	 // printf("ibeg %llu iend %llu\n", (unsigned long long)ibeg, (unsigned long long)iend);
       for ( Member i = ibeg ; i < iend ; ++i ) {
         functor( i );
       }
@@ -111,6 +112,7 @@ private:
   defined( KOKKOS_ENABLE_PRAGMA_IVDEP )
 #pragma ivdep
 #endif
+	 // printf("ibeg %lu iend %lu\n", ibeg, iend);
       for ( Member i = ibeg ; i < iend ; ++i ) {
         functor( t , i );
       }
@@ -118,9 +120,7 @@ private:
 
   static void exec( QthreadsExec & exec , const void * arg )
   {
-    printf("scheduling by type\n");
     exec_schedule<typename Policy::schedule_type::type>(exec,arg);
-    printf("scheduled by type\n");
   }
 
   template<class Schedule>
@@ -135,7 +135,7 @@ private:
     ParallelFor::template exec_range< WorkTag >
       ( self.m_functor , range.begin() , range.end() );
 
-    //exec.fan_in();
+    exec.fan_in();
   }
 
   template<class Schedule>
@@ -148,7 +148,6 @@ private:
     WorkRange range( self.m_policy , exec.worker_rank() , exec.worker_size() );
 
     exec.set_work_range(range.begin(),range.end(),self.m_policy.chunk_size());
-    //exec.reset_steal_target();
     exec.exec_all_barrier();
 
     long work_index = exec.get_work_index();
@@ -224,9 +223,9 @@ private:
 
   static void exec( QthreadsExec & exec , const void * arg )
   {
-    printf("exec 1\n");
+   // printf("exec 1\n");
     exec_schedule<typename Policy::schedule_type::type>(exec,arg);
-    printf("execed 1\n");
+   // printf("execed 1\n");
   }
 
   template<class Schedule>
@@ -237,10 +236,10 @@ private:
     const ParallelFor & self = * ((const ParallelFor *) arg );
 
     WorkRange range( self.m_policy , exec.worker_rank() , exec.worker_size() );
-    printf("%s: exec_range", __func__);
+   // printf("%s: exec_range", __func__);
     ParallelFor::exec_range
       ( self.m_mdr_policy, self.m_functor , range.begin() , range.end() );
-    printf("%s: exec_ranged", __func__);
+   // printf("%s: exec_ranged", __func__);
     //exec.fan_in();
   }
 
@@ -316,7 +315,7 @@ private:
   && std::is_same<Schedule,Kokkos::Static>::value >::type
   exec_team( const FunctorType & functor , Member member )
     {
-	printf("need to implement scheduling\n");
+//	printf("need to implement scheduling\n");
       //for ( ; member.valid_static() ; member.next_static() ) {
        // functor( member );
       //}
@@ -331,7 +330,7 @@ private:
       const TagType t{} ;
 
 
-	printf("need to implement scheduling\n");
+//	printf("need to implement scheduling\n");
       //for ( ; member.valid_static() ; member.next_static() ) {
        // functor( t , member );
       //}
@@ -344,7 +343,7 @@ private:
   exec_team( const FunctorType & functor , Member member )
     {
 
-	printf("need to implement scheduling\n");
+//	printf("need to implement scheduling\n");
       //for ( ; member.valid_dynamic() ; member.next_dynamic() ) {
        // functor( member );
       //}
@@ -441,12 +440,12 @@ private:
   defined( KOKKOS_ENABLE_PRAGMA_IVDEP )
 #pragma ivdep
 #endif
-      printf("exec_range 1\n");
+     // printf("exec_range 1\n");
       for ( Member i = ibeg ; i < iend ; ++i ) {
         functor( i , update );
       }
 
-      printf("exec_ranged 1\n");
+     // printf("exec_ranged 1\n");
     }
 
   template< class TagType >
@@ -458,7 +457,7 @@ private:
     {
       const TagType t{} ;
 
-      printf("exec_range 2\n");
+     // printf("exec_range 2\n");
 #if defined( KOKKOS_ENABLE_AGGRESSIVE_VECTORIZATION ) &&  \
   defined( KOKKOS_ENABLE_PRAGMA_IVDEP )
 #pragma ivdep
@@ -466,15 +465,15 @@ private:
       for ( Member i = ibeg ; i < iend ; ++i ) {
         functor( t , i , update );
       }
-      printf("exec_ranged 2\n");
+     // printf("exec_ranged 2\n");
     }
 
   static void
   exec( QthreadsExec & exec , const void * arg ) {
 
-    printf("exec 2\n");
+   // printf("exec 2\n");
     exec_schedule<typename Policy::schedule_type::type>(exec, arg);
-    printf("execed 2\n");
+   // printf("execed 2\n");
   }
 
   template<class Schedule>
@@ -485,13 +484,13 @@ private:
     const ParallelReduce & self = * ((const ParallelReduce *) arg );
     const WorkRange range( self.m_policy, exec.worker_rank(), exec.worker_size() );
 
-    printf("exec_schedule\n");
+   // printf("exec_schedule\n");
     ParallelReduce::template exec_range< WorkTag >
       ( self.m_functor , range.begin() , range.end()
       , ValueInit::init( ReducerConditional::select(self.m_functor , self.m_reducer) , exec.exec_all_reduce_value() ) );
 
     exec.template exec_all_reduce< FunctorType, ReducerType , WorkTag >( self.m_functor , self.m_reducer );
-    printf("exec_scheduled\n");
+   // printf("exec_scheduled\n");
   }
 
   template<class Schedule>
@@ -527,7 +526,7 @@ public:
     {
       QthreadsExec::resize_worker_scratch( ValueTraits::value_size( ReducerConditional::select(m_functor , m_reducer) ) , 0 );
 
-      printf("execute parallel reduce\n");
+     // printf("execute parallel reduce\n");
       QthreadsExec::exec_all(Qthreads::instance(), & ParallelReduce::exec , this );
       //sleep(1);
       //QthreadsExec::start( & ParallelReduce::exec , this );
@@ -546,7 +545,7 @@ public:
         //  std::cout << "m_result_ptr " << m_result_ptr[i] << std::endl;
         }
       }
-      printf("executed parallel reduce\n");
+     // printf("executed parallel reduce\n");
     }
 
   template< class HostViewType >
@@ -561,7 +560,7 @@ public:
     , m_reducer( InvalidType() )
     , m_result_ptr( arg_result_view.data() )
     {
-      printf("making parallel reduce with view\n");
+     // printf("making parallel reduce with view\n");
       std::cout << "arg_result_view.data() " << arg_result_view.data() << std::endl;
       static_assert( Kokkos::is_view< HostViewType >::value
                      , "Kokkos::Qthreads reduce result must be a View" );
@@ -579,7 +578,7 @@ public:
     , m_reducer( reducer )
     , m_result_ptr( reducer.view().data() )
     {
-      printf("making parallel reduce with reducer\n");
+     // printf("making parallel reduce with reducer\n");
       /*
       static_assert( std::is_same< typename ViewType::memory_space, HostSpace >::value
         , "Reduction result on Kokkos::Qthreads must be a Kokkos::View in HostSpace" );
@@ -624,7 +623,7 @@ private:
   typename std::enable_if< std::is_same< TagType , void >::value >::type
   exec_team( const FunctorType & functor , Member member , reference_type update )
     {
-	printf("need to enable\n");
+//	printf("need to enable\n");
       //for ( ; member.valid_static() ; member.next_static() ) {
        // functor( member , update );
       //}
@@ -636,7 +635,7 @@ private:
   exec_team( const FunctorType & functor , Member member , reference_type update )
     {
       const TagType t{} ;
-	printf("need to enable\n");
+//	printf("need to enable\n");
       //for ( ; member.valid_static() ; member.next_static() ) {
        // functor( t , member , update );
       //}
@@ -649,7 +648,7 @@ private:
     ParallelReduce::template exec_team< WorkTag >
       ( self.m_functor , Member( & exec , self.m_policy , self.m_shared )
       , ValueInit::init( ReducerConditional::select(self.m_functor , self.m_reducer) , exec.exec_all_reduce_value() ) );
-    printf("executing all reduce\n");
+   // printf("executing all reduce\n");
     exec.template exec_all_reduce< FunctorType, ReducerType, WorkTag >( self.m_functor, self.m_reducer );
   }
 
@@ -658,7 +657,7 @@ public:
   inline
   void execute() const
     {
-      printf("executing team reduce\n");
+     // printf("executing team reduce\n");
       QthreadsExec::resize_worker_scratch( ValueTraits::value_size( ReducerConditional::select(m_functor , m_reducer) ) , 0 );
       QthreadsExec::exec_all(Qthreads::instance(), & ParallelReduce::exec , this );
       //QthreadsExec::start( & ParallelReduce::exec , this );
@@ -690,7 +689,7 @@ public:
     //, m_shared( arg_policy.scratch_size(0) + arg_policy.scratch_size(1) + FunctorTeamShmemSize< FunctorType >::value( arg_functor , arg_policy.team_size() ) )
     , m_shared( 1024*1024 )
     {
-      printf("making another parallel reduce with reducer\n");
+     // printf("making another parallel reduce with reducer\n");
     }
 
   inline
@@ -704,7 +703,7 @@ public:
   //, m_shared( arg_policy.scratch_size(0) + arg_policy.scratch_size(1) + FunctorTeamShmemSize< FunctorType >::value( arg_functor , arg_policy.team_size() ) )
   , m_shared( 1024*1024 )
   {
-    printf("making another parallel reduce with reducer\n");
+   // printf("making another parallel reduce with reducer\n");
   /*static_assert( std::is_same< typename ViewType::memory_space
                           , Kokkos::HostSpace >::value
   , "Reduction result on Kokkos::OpenMP must be a Kokkos::View in HostSpace" );*/
@@ -747,7 +746,7 @@ private:
           defined( KOKKOS_ENABLE_PRAGMA_IVDEP )
       #pragma ivdep
       #endif
-      printf("execing range parallel scan\n");
+     // printf("execing range parallel scan\n");
       for ( Member i = ibeg ; i < iend ; ++i ) {
         functor( i , update , final );
       }
@@ -766,7 +765,7 @@ private:
       #pragma ivdep
       #endif
 
-      printf("execing range 2 parallel scan\n");
+     // printf("execing range 2 parallel scan\n");
       for ( Member i = ibeg ; i < iend ; ++i ) {
         functor( t , i , update , final );
       }
@@ -778,7 +777,7 @@ private:
 
     const WorkRange range( self.m_policy, exec.worker_rank(), exec.worker_size() );
 
-    printf("execing regular 2 parallel scan\n");
+   // printf("execing regular 2 parallel scan\n");
     reference_type update =
       ValueInit::init( self.m_functor , exec.exec_all_reduce_value() );
 
@@ -800,7 +799,7 @@ public:
   void execute() const
     {
 
-      printf("execing inline parallel scan\n");
+     // printf("execing inline parallel scan\n");
       QthreadsExec::resize_worker_scratch( 2 * ValueTraits::value_size( m_functor ) , 0 );
       QthreadsExec::exec_all(Qthreads::instance(), & ParallelScan::exec , this );
       // QthreadsExec::start( & ParallelScan::exec , this );
@@ -811,7 +810,9 @@ public:
               , const Policy      & arg_policy )
     : m_functor( arg_functor )
     , m_policy( arg_policy )
-  {printf("making scan\n"); }
+  { 
+	//printf("making scan\n"); 
+  }
 };
 
 
@@ -880,7 +881,7 @@ private:
     reference_type update =
       ValueInit::init( self.m_functor , exec.exec_all_reduce_value() );
 
-    printf("execing range for parallel scan\n");
+   // printf("execing range for parallel scan\n");
     ParallelScanWithTotal::template exec_range< WorkTag >
       ( self.m_functor , range.begin(), range.end(), update, false );
 
@@ -903,7 +904,7 @@ public:
   void execute() const
     {
 
-      printf("executing parallel scan\n");
+     // printf("executing parallel scan\n");
       QthreadsExec::resize_worker_scratch( 2 * ValueTraits::value_size( m_functor ) , 0 );
       //QthreadsExec::exec_all(Qthreads::instance(), & ParallelFor::exec , this );
       //QthreadsExec::start( & ParallelScanWithTotal::exec , this );

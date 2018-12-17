@@ -54,6 +54,7 @@
 #define CLONED_TASKS
 
 #include <qthread/qthread.h>
+#include <qthread/barrier.h>
 
 #include <cstddef>
 #include <iosfwd>

@@ -49,6 +49,7 @@
 
 #include <unistd.h>
 #include <impl/Kokkos_Spinwait.hpp>
+#include <qthread/barrier.h>
 
 //----------------------------------------------------------------------------
 
@@ -60,7 +61,7 @@ class QthreadsExec;
 typedef void (*QthreadsExecFunctionPointer)( QthreadsExec &, const void * );
 
 class QthreadsExec {
-private:
+public:
 
   /** \brief States of a worker thread */
   enum { Terminating ///<  Termination in progress
@@ -72,18 +73,33 @@ private:
          , ScanAvailable
          , ReductionAvailable
   };
+private:
 
+  friend class Kokkos::Qthreads;
+
+  QthreadsExec * const * m_pool_base ; ///< Base for pool fan-in
   const QthreadsExec * const * m_worker_base;
   const QthreadsExec * const * m_shepherd_base;
 
-  void  * m_scratch_alloc;  ///< Scratch memory [ reduce, team, shared ]
-  int     m_reduce_end;     ///< End of scratch reduction memory
+  void  * m_scratch ;  ///< Scratch memory [ reduce, team, shared ]
+  int     m_reduce_end ;     ///< End of scratch reduction memory
+  int     m_scratch_reduce_end ;
+  int     m_scratch_thread_end ;
+  int     m_shepherd_rank ;
+  int     m_shepherd_size ;
 
-  int     m_shepherd_rank;
-  int     m_shepherd_size;
+  int     m_shepherd_worker_rank ;
+  int     m_shepherd_worker_size ;
 
-  int     m_shepherd_worker_rank;
-  int     m_shepherd_worker_size;
+  int           m_numa_rank ;
+  int           m_numa_core_rank ;
+  int           m_pool_rank ;
+  int           m_pool_rank_rev ;
+  int           m_pool_size ;
+  int           m_pool_fan_size ;
+  int volatile  m_pool_state ;  ///< State for global synchronizations
+  qt_barrier_t * m_barrier;
+
 
   /*
    *  m_worker_rank = m_shepherd_rank * m_shepherd_worker_size + m_shepherd_worker_rank
@@ -92,20 +108,77 @@ private:
   int     m_worker_rank;
   int     m_worker_size;
 
-  // This thread's owned work_range
-  Kokkos::pair<long,long> m_work_range __attribute__((aligned(16))) ;
-  long m_team_work_index;
-
   int mutable volatile m_worker_state;
 
-  friend class Kokkos::Qthreads;
+  // Members for dynamic scheduling
 
-  ~QthreadsExec();
+  // This thread's owned work_range
+  Kokkos::pair<long,long> m_work_range __attribute__((aligned(16))) ;
+  // Team Offset if one thread determines work_range for others
+  long m_team_work_index;
+
+
+
+  static void global_lock();
+  static void global_unlock();
+  static bool spawn();
+
+  static void execute_resize_scratch( QthreadsExec & , const void * );
+  static void execute_sleep(          QthreadsExec & , const void * );
+
   QthreadsExec( const QthreadsExec & );
   QthreadsExec & operator = ( const QthreadsExec & );
 
+  static void execute_serial( void (*)( QthreadsExec & , const void * ) );
+
 public:
+
+  KOKKOS_INLINE_FUNCTION int pool_rank() const { return m_pool_rank; }
+  KOKKOS_INLINE_FUNCTION int pool_size() const { return m_pool_size; }
+  KOKKOS_INLINE_FUNCTION int team_rank() const { return m_numa_rank; }
+  KOKKOS_INLINE_FUNCTION int team_core_rank() const { return m_numa_core_rank; }
+  inline long team_work_index() const { return m_team_work_index ; }
+
+  static int get_thread_count();
+  static QthreadsExec * get_thread( const int init_thread_rank );
+
+
+  inline void * reduce_memory() const { return m_scratch ; }
+  KOKKOS_INLINE_FUNCTION  void * scratch_memory() const
+  { return reinterpret_cast<unsigned char *>(m_scratch) + m_scratch_reduce_end ; }
+
+  KOKKOS_INLINE_FUNCTION  int volatile & state() { return m_pool_state ; }
+  KOKKOS_INLINE_FUNCTION  QthreadsExec * const * pool_base() const { return m_pool_base ; }
+
+  static void driver(void);
+
+  ~QthreadsExec();
   QthreadsExec();
+
+
+  static void * resize_scratch( size_t reduce_size , size_t thread_size );
+
+  static void * root_reduce_scratch();
+
+  static bool is_process();
+
+  static void verify_is_process( const std::string & , const bool initialized );
+
+  static int is_initialized();
+
+  static void finalize();
+
+  /* Given a requested team size, return valid team size */
+  static unsigned team_size_valid( unsigned );
+
+  static void print_configuration( std::ostream & , const bool detail = false );
+
+  //------------------------------------
+
+  static void wait_yield( volatile int & , const int );
+
+  //------------------------------------
+  // All-thread functions:
 
   /** Execute the input function on all available Qthreads workers. */
   static void exec_all( Qthreads &, QthreadsExecFunctionPointer, const void * );
@@ -116,13 +189,15 @@ public:
     const int rev_rank = m_worker_size - ( m_worker_rank + 1 );
 
     int n, j;
-    std::cout << "execall barriering\n";
-    for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
-      Impl::spinwait_while_equal<int>( m_worker_base[j]->m_worker_state, QthreadsExec::Active );
-    }
+    //printf("execall barriering\n");
+    // this should be a qthreads barrier. 
+    //for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
+	  qt_barrier_enter(m_barrier);
+    //}
     if ( rev_rank ) {
       m_worker_state = QthreadsExec::Inactive;
-      Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
+	  qt_barrier_enter(m_barrier);
+      //Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
     }
 
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
@@ -155,21 +230,22 @@ public:
     }
   }
 
+  inline
+  void fan_in() const
+    {
+ 		qt_barrier_enter(m_barrier);
+    }
   static int  in_parallel();
-
-  static int is_initialized();
 
   static void fence();
   //static bool sleep();
   static bool wake();
-  static void finalize();
   static void initialize (
     unsigned thread_count ,
     unsigned use_numa_count ,
     unsigned use_cores_per_numa ,
     bool allow_asynchronous_threadpool );
 
-  static void print_configuration( std::ostream & , const bool detail = false );
 
   /** Reduce across all workers participating in the 'exec_all'. */
   template< class FunctorType, class ReducerType, class ArgTag >
@@ -185,31 +261,31 @@ public:
 
     int n, j;
 
-    //std::cout << "*m_scratch_alloc " << *m_scratch_alloc << std::endl; //<< " *m_worker_base[1].m_scratch_alloc " << *m_worker_base[1]->m_scratch_alloc << std::endl;
+    //std::cout << "*m_scratch " << *m_scratch_alloc << std::endl; //<< " *m_worker_base[1].m_scratch_alloc " << *m_worker_base[1]->m_scratch_alloc << std::endl;
     std::cout << "rev_rank " << rev_rank << " m_worker_size " << m_worker_size << std::endl;
     //std::cout << "rev_rank " << rev_rank << " n " << 1 << " rev_rank & n " << rev_rank & 1 << " m_worker_size " << m_worker_size << std::endl;
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
       const QthreadsExec & fan = *m_worker_base[j];
 
-      Impl::spinwait_while_equal<int>( fan.m_worker_state, QthreadsExec::Active );
+      qt_barrier_enter(m_barrier);
+      //Impl::spinwait_while_equal<int>( fan.m_worker_state, QthreadsExec::Active );
 
-      ValueJoin::join( ReducerConditional::select( func, reduce ), m_scratch_alloc, fan.m_scratch_alloc );
-      std::cout << "m_scratch_alloc " << m_scratch_alloc << " fan.m_scratch_alloc " << fan.m_scratch_alloc << std::endl;
+      ValueJoin::join( ReducerConditional::select( func, reduce ), m_scratch, fan.m_scratch );
+      std::cout << "m_scratch " << m_scratch << " fan.m_scratch_alloc " << fan.m_scratch << std::endl;
     }
 
     std::cout << "rev_rank 1 " << rev_rank << " m_worker_size " << m_worker_size << std::endl;
     if ( rev_rank ) {
-      printf("m_worker_state %d\n", m_worker_state);
+      //printf("m_worker_state %d\n", m_worker_state);
       m_worker_state = QthreadsExec::Inactive;
-      printf("spinwaiting\n");
-      sleep(1);
-      //Impl::spinwait_while_equal<int>( m_worker_state, QthreadsExec::Inactive );
-      printf("spinwaited\n");
+      //printf("spinwaiting\n");
+      qt_barrier_enter(m_barrier);
+      //printf("spinwaited\n");
     }
 
     std::cout << "for rev_rank 1 " << rev_rank << " m_worker_size " << m_worker_size << std::endl;
     for ( n = 1; ( ! ( rev_rank & n ) ) && ( ( j = rev_rank + n ) < m_worker_size ); n <<= 1 ) {
-      printf("m_worker_base %p n %d\n", m_worker_base, n);
+      //printf("m_worker_base %p n %d\n", m_worker_base, n);
       //m_worker_base[j]->m_worker_state = QthreadsExec::Active;
     }
     std::cout << "done\n";
@@ -245,17 +321,17 @@ public:
       // Copy from lower ranking to higher ranking worker.
       for ( int i = 1; i < m_worker_size; ++i ) {
         ValueOps::copy( func
-                      , m_worker_base[i-1]->m_scratch_alloc
-                      , m_worker_base[i]->m_scratch_alloc
+                      , m_worker_base[i-1]->m_scratch
+                      , m_worker_base[i]->m_scratch
                       );
       }
 
-      ValueInit::init( func, m_worker_base[m_worker_size-1]->m_scratch_alloc );
+      ValueInit::init( func, m_worker_base[m_worker_size-1]->m_scratch );
 
       // Join from lower ranking to higher ranking worker.
       // Value at m_worker_base[n-1] is zero so skip adding it to m_worker_base[n-2].
       for ( int i = m_worker_size - 1; --i > 0; ) {
-        ValueJoin::join( func, m_worker_base[i-1]->m_scratch_alloc, m_worker_base[i]->m_scratch_alloc );
+        ValueJoin::join( func, m_worker_base[i-1]->m_scratch, m_worker_base[i]->m_scratch );
       }
     }
 
@@ -269,7 +345,7 @@ public:
   template< class Type >
   inline
   volatile Type * shepherd_team_scratch_value() const
-  { return (volatile Type*)( ( (unsigned char *) m_scratch_alloc ) + m_reduce_end ); }
+  { return (volatile Type*)( ( (unsigned char *) m_scratch ) + m_reduce_end ); }
 
   template< class Type >
   inline
@@ -444,13 +520,14 @@ public:
 
   void * exec_all_reduce_value() const {
     std::cout << "exec all reduce value 1\n";
-    return m_scratch_alloc; }
+    return m_scratch; }
 
   /* Dynamic Scheduling related functionality */
   // Initialize the work range for this thread
   inline void set_work_range(const long& begin, const long& end, const long& chunk_size) {
     m_work_range.first = (begin+chunk_size-1)/chunk_size;
     m_work_range.second = end>0?(end+chunk_size-1)/chunk_size:m_work_range.first;
+    //printf("%s: begin %ld end %ld chunk_size %ld m_work_range.first %ld m_work_range.second %ld\n", __func__, begin, end, chunk_size, m_work_range.first, m_work_range.second);
   }
 
   // Claim and index from this thread's range from the beginning
@@ -497,8 +574,15 @@ public:
       return -1;
   }
 
-  long get_work_index() { return 1; }
-  long steal_work_index() { return 1; }
+  long get_work_index(int team_size = 0) {
+    long work_index = -1;
+    work_index = get_work_index_begin();
+
+    m_team_work_index = work_index;
+    memory_fence();
+    return work_index;
+  }
+
 
   static void * exec_all_reduce_result();
 
@@ -515,228 +599,6 @@ public:
   inline int shepherd_size() const { return m_shepherd_size; }
 
   static int worker_per_shepherd();
-};
-
-} // namespace Impl
-
-} // namespace Kokkos
-
-//----------------------------------------------------------------------------
-
-namespace Kokkos {
-
-namespace Impl {
-
-class QthreadsTeamPolicyMember {
-private:
-  typedef Kokkos::Qthreads                       execution_space;
-  typedef execution_space::scratch_memory_space  scratch_memory_space;
-
-  Impl::QthreadsExec   & m_exec;
-  scratch_memory_space   m_team_shared;
-  const int              m_team_size;
-  const int              m_team_rank;
-  const int              m_league_size;
-  const int              m_league_end;
-        int              m_league_rank;
-
-public:
-  KOKKOS_INLINE_FUNCTION
-  const scratch_memory_space & team_shmem() const { return m_team_shared; }
-
-  KOKKOS_INLINE_FUNCTION int league_rank() const { return m_league_rank; }
-  KOKKOS_INLINE_FUNCTION int league_size() const { return m_league_size; }
-  KOKKOS_INLINE_FUNCTION int team_rank() const { return m_team_rank; }
-  KOKKOS_INLINE_FUNCTION int team_size() const { return m_team_size; }
-
-  KOKKOS_INLINE_FUNCTION void team_barrier() const
-#if ! defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
-  {}
-#else
-  { m_exec.shepherd_barrier( m_team_size ); }
-#endif
-
-  template< typename Type >
-  KOKKOS_INLINE_FUNCTION Type team_broadcast( const Type & value, int rank ) const
-#if ! defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
-  { return Type(); }
-#else
-  { return m_exec.template shepherd_broadcast<Type>( value, m_team_size, rank ); }
-#endif
-
-  template< typename Type >
-  KOKKOS_INLINE_FUNCTION Type team_reduce( const Type & value ) const
-#if ! defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
-  { return Type(); }
-#else
-  { return m_exec.template shepherd_reduce<Type>( m_team_size, value ); }
-#endif
-
-  template< typename JoinOp >
-  KOKKOS_INLINE_FUNCTION typename JoinOp::value_type
-  team_reduce( const typename JoinOp::value_type & value
-             , const JoinOp & op ) const
-#if ! defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
-  { return typename JoinOp::value_type(); }
-#else
-  { return m_exec.template shepherd_reduce<JoinOp>( m_team_size, value, op ); }
-#endif
-
-  /** \brief  Intra-team exclusive prefix sum with team_rank() ordering.
-   *
-   *  The highest rank thread can compute the reduction total as
-   *    reduction_total = dev.team_scan( value ) + value;
-   */
-  template< typename Type >
-  KOKKOS_INLINE_FUNCTION Type team_scan( const Type & value ) const
-#if ! defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
-  { return Type(); }
-#else
-  { return m_exec.template shepherd_scan<Type>( m_team_size, value ); }
-#endif
-
-  /** \brief  Intra-team exclusive prefix sum with team_rank() ordering
-   *          with intra-team non-deterministic ordering accumulation.
-   *
-   *  The global inter-team accumulation value will, at the end of the league's
-   *  parallel execution, be the scan's total.  Parallel execution ordering of
-   *  the league's teams is non-deterministic.  As such the base value for each
-   *  team's scan operation is similarly non-deterministic.
-   */
-  template< typename Type >
-  KOKKOS_INLINE_FUNCTION Type team_scan( const Type & value, Type * const global_accum ) const
-#if ! defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
-  { return Type(); }
-#else
-  { return m_exec.template shepherd_scan<Type>( m_team_size, value, global_accum ); }
-#endif
-
-  //----------------------------------------
-  // Private driver for task-team parallel.
-
-  struct TaskTeam {};
-
-  QthreadsTeamPolicyMember();
-  explicit QthreadsTeamPolicyMember( const TaskTeam & );
-
-  //----------------------------------------
-  // Private for the driver ( for ( member_type i( exec, team ); i; i.next_team() ) { ... }
-
-  // Initialize.
-  template< class ... Properties >
-  QthreadsTeamPolicyMember( Impl::QthreadsExec & exec
-                          , const Kokkos::Impl::TeamPolicyInternal< Qthreads, Properties... > & team )
-    : m_exec( exec )
-    , m_team_shared( 0, 0 )
-    , m_team_size( team.m_team_size )
-    , m_team_rank( exec.shepherd_worker_rank() )
-    , m_league_size( team.m_league_size )
-    , m_league_end( team.m_league_size - team.m_shepherd_iter * ( exec.shepherd_size() - ( exec.shepherd_rank() + 1 ) ) )
-    , m_league_rank( m_league_end > team.m_shepherd_iter ? m_league_end - team.m_shepherd_iter : 0 )
-  {
-    m_exec.shared_reset( m_team_shared );
-  }
-
-  // Continue.
-  operator bool () const { return m_league_rank < m_league_end; }
-
-  // Iterate.
-  void next_team() { ++m_league_rank; m_exec.shared_reset( m_team_shared ); }
-};
-
-template< class ... Properties >
-class TeamPolicyInternal< Kokkos::Qthreads, Properties ... >
-  : public PolicyTraits< Properties... >
-{
-private:
-  const int m_league_size;
-  const int m_team_size;
-  const int m_shepherd_iter;
-
-public:
-  //! Tag this class as a kokkos execution policy.
-  typedef TeamPolicyInternal              execution_policy;
-  typedef Qthreads                        execution_space;
-  typedef PolicyTraits< Properties ... >  traits;
-
-  //----------------------------------------
-
-  template< class FunctorType >
-  inline static
-  int team_size_max( const FunctorType & )
-  { return Qthreads::instance().shepherd_worker_size(); }
-
-  template< class FunctorType >
-  static int team_size_recommended( const FunctorType & f )
-  { return team_size_max( f ); }
-
-  template< class FunctorType >
-  inline static
-  int team_size_recommended( const FunctorType & f, const int& )
-  { return team_size_max( f ); }
-
-  //----------------------------------------
-
-  inline int team_size()   const { return m_team_size; }
-  inline int league_size() const { return m_league_size; }
-
-  // One active team per shepherd.
-  TeamPolicyInternal( Kokkos::Qthreads & q
-                    , const int league_size
-                    , const int team_size
-                    , const int /* vector_length */ = 0
-                    )
-    : m_league_size( league_size )
-    , m_team_size( team_size < q.shepherd_worker_size()
-                 ? team_size : q.shepherd_worker_size() )
-    , m_shepherd_iter( ( league_size + q.shepherd_size() - 1 ) / q.shepherd_size() )
-  {}
-
-  // TODO: Make sure this is correct.
-  // One active team per shepherd.
-  TeamPolicyInternal( Kokkos::Qthreads & q
-                    , const int league_size
-                    , const Kokkos::AUTO_t & /* team_size_request */
-                    , const int /* vector_length */ = 0
-                    )
-    : m_league_size( league_size )
-    , m_team_size( q.shepherd_worker_size() )
-    , m_shepherd_iter( ( league_size + q.shepherd_size() - 1 ) / q.shepherd_size() )
-  {}
-
-  // One active team per shepherd.
-  TeamPolicyInternal( const int league_size
-                    , const int team_size
-                    , const int /* vector_length */ = 0
-                    )
-    : m_league_size( league_size )
-    , m_team_size( team_size < Qthreads::instance().shepherd_worker_size()
-                 ? team_size : Qthreads::instance().shepherd_worker_size() )
-    , m_shepherd_iter( ( league_size + Qthreads::instance().shepherd_size() - 1 ) / Qthreads::instance().shepherd_size() )
-  {}
-
-  // TODO: Make sure this is correct.
-  // One active team per shepherd.
-  TeamPolicyInternal( const int league_size
-                    , const Kokkos::AUTO_t & /* team_size_request */
-                    , const int /* vector_length */ = 0
-                    )
-    : m_league_size( league_size )
-    , m_team_size( Qthreads::instance().shepherd_worker_size() )
-    , m_shepherd_iter( ( league_size + Qthreads::instance().shepherd_size() - 1 ) / Qthreads::instance().shepherd_size() )
-  {}
-
-  // TODO: Doesn't do anything yet.  Fix this.
-  /** \brief set chunk_size to a discrete value*/
-  inline TeamPolicyInternal set_chunk_size(typename traits::index_type chunk_size_) const {
-    TeamPolicyInternal p = *this;
-//    p.m_chunk_size = chunk_size_;
-    return p;
-  }
-
-  typedef Impl::QthreadsTeamPolicyMember member_type;
-
-  friend class Impl::QthreadsTeamPolicyMember;
 };
 
 } // namespace Impl
@@ -771,38 +633,6 @@ inline void Qthreads::impl_initialize(
 {
   Impl::QthreadsExec::initialize( threads_count , use_numa_count , use_cores_per_numa , allow_asynchronous_threadpool );
 }
-#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
-inline void Qthreads::initialize(
-#else
-inline void Qthreads::impl_initialize(
-#endif
-                                      unsigned threads_count ,
-                                      unsigned use_numa_count )
-{
-  Impl::QthreadsExec::initialize( threads_count , use_numa_count , threads_count, false );
-}
-
-#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
-inline void Qthreads::initialize(
-#else
-inline void Qthreads::impl_initialize(
-#endif
-                                      unsigned threads_count )
-{
-  Impl::QthreadsExec::initialize( threads_count , 1 , threads_count, false);
-}
-
-#ifdef KOKKOS_ENABLE_DEPRECATED_CODE
-inline void Qthreads::initialize(
-#else
-inline void Qthreads::impl_initialize(
-#endif
-                                      )
-{
-  Impl::QthreadsExec::initialize( std::thread::hardware_concurrency(), 1 ,  std::thread::hardware_concurrency(), false);
-}
-
-
 
 #ifdef KOKKOS_ENABLE_DEPRECATED_CODE
 inline void Qthreads::finalize()
@@ -819,11 +649,11 @@ inline void Qthreads::print_configuration( std::ostream & s , const bool detail 
 }
 
 #ifdef KOKKOS_ENABLE_DEPRECATED_CODE
-//inline bool Qthreads::sleep()
-//{ return Impl::QthreadsExec::sleep() ; }
+inline bool Qthreads::sleep()
+{ /* return Impl::QthreadsExec::sleep() ;  */ return true; }
 
 inline bool Qthreads::wake()
-{ return Impl::QthreadsExec::wake() ; }
+{ /* return Impl::QthreadsExec::wake() ; */ return true; }
 #endif
 
 inline void Qthreads::fence()
@@ -835,5 +665,4 @@ inline void Qthreads::fence()
 //----------------------------------------------------------------------------
 
 #endif
-#endif // #define KOKKOS_QTHREADSEXEC_HPP
-
+#endif /* #define KOKKOS_QTHREADSEXEC_HPP */
